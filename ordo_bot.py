@@ -23,6 +23,8 @@ import yaml
 
 # MAIN
 # Load config
+from sentry_sdk import capture_exception, push_scope
+
 with open('.config', 'r', encoding="utf-8") as configfile:
     cfg = yaml.safe_load(configfile)
 
@@ -52,8 +54,8 @@ logger.info('Session started')
 
 # Init and configure discord bot
 discord_token = cfg['bot']['bot token']
-discord_watched_channels = cfg['bot']['watched channels']
 bot_admins = cfg['bot']['admin users']
+discord_watched_channels = cfg['bot']['watched channels']
 target_image_channel = cfg['bot']['target channel']
 
 intents = Intents().default()
@@ -63,6 +65,7 @@ intents.reactions = True
 client = commands.Bot(intents=intents, command_prefix="?")
 copy_image_emoji = 'hothothot'
 main_channel = ''
+
 
 # TRIGGERS AND COMMANDS
 @client.event
@@ -74,6 +77,7 @@ async def on_ready():
             f"{guild.name}(id: {guild.id})"
         )
 
+
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     """Gives a role based on a reaction emoji."""
@@ -84,40 +88,60 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.emoji.name != copy_image_emoji:
         return
 
-    print("Got emoji reaction")
-    print(payload)
-
     source_msg = await client.get_channel(payload.channel_id).fetch_message(payload.message_id)
-    print("fetched msg", source_msg, "content:", source_msg.content, "attaches:", source_msg.attachments)
-    #we dont handle non-pics, or multi-pics (if any)
+    # print("fetched msg", source_msg, "content:", source_msg.content, "attaches:", source_msg.attachments)
+    # we dont handle non-pics, or multi-pics (if any)
     if len(source_msg.attachments) != 1:
         return
 
-    image_author = source_msg.author.nick
+    # only first reaction is processed
+    for current_reaction in source_msg.reactions:
+        if current_reaction.emoji.name == copy_image_emoji and current_reaction.count > 1:
+            return
 
-    #download file locally
+    # you cant like your own image
+    emoji_author = payload.user_id
+    if source_msg.author.id == emoji_author:
+        return
+
+    if source_msg.author.nick is None:
+        image_author = source_msg.author.name
+    else:
+        image_author = source_msg.author.nick
+
+    # download file locally
     downloaded_file = requests.get(source_msg.attachments[0].url)
     print(downloaded_file)
     print(downloaded_file.headers.get('content-type'))
 
-    image_dir =os.path.join(os.getcwd(), 'images')
-    isExist = os.path.exists(image_dir)
-    if not isExist:
+    image_dir = os.path.join(os.getcwd(), 'images')
+    dir_exists = os.path.exists(image_dir)
+    if not dir_exists:
         os.makedirs(image_dir)
     result_path = os.path.join(image_dir, str(source_msg.id) + '_' + source_msg.attachments[0].filename)
-    print("Result path is ", result_path)
     open(result_path, 'wb').write(downloaded_file.content)
 
-    #Send attachment to specific channel
-    print ("Trying to reupload")
+    # Send attachment to specific channel
     target_channel = client.get_channel(target_image_channel)
-    my_embed = discord.Embed(url=source_msg.attachments[0].url, description=source_msg.attachments[0].filename)
-
     upload_file = discord.File(result_path)
-    print ("Sending new embed")
-    print (my_embed.url)
-    await target_channel.send(content=image_author + ' proudly presents, ' + payload.member.nick + ' approves', file=upload_file)
+    if payload.member.nick is None:
+        approverName = payload.member.name
+    else:
+        approverName = payload.member.nick
 
+    try:
+        message_string = image_author + ' proudly presents, ' + approverName + ' approves'
+        await target_channel.send(content=message_string,
+                                  file=upload_file)
+    except Exception as e:
+        with push_scope() as scope:
+            scope.set_context('generic context', {
+                'author': image_author,
+                'approver': approverName,
+                'payload': payload,
+                'source_msg': source_msg
+            })
+            capture_exception(e)
 
 client.run(discord_token)
 print("the end")
