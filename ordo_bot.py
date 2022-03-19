@@ -13,6 +13,7 @@ import time
 import urllib
 import discord
 import requests
+import pprint
 
 from discord import Intents, Reaction
 from discord.ext.commands import HelpCommand
@@ -76,6 +77,8 @@ async def on_ready():
             f"{client.user} is connected to the following guild:\n"
             f"{guild.name}(id: {guild.id})"
         )
+        for channel in guild.channels:
+            pprint.pprint (channel)
 
 
 @client.event
@@ -111,7 +114,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     # download file locally
     downloaded_file = requests.get(source_msg.attachments[0].url)
-    print(downloaded_file)
+    # print(downloaded_file)
     print(downloaded_file.headers.get('content-type'))
 
     image_dir = os.path.join(os.getcwd(), 'images')
@@ -123,6 +126,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     # Send attachment to specific channel
     target_channel = client.get_channel(target_image_channel)
+    if target_channel is None:
+        print ("Failed to get channel", target_image_channel)
+        return
     upload_file = discord.File(result_path)
     if payload.member.nick is None:
         approverName = payload.member.name
