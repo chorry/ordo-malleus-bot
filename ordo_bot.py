@@ -142,6 +142,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 'source_msg': source_msg
             })
             capture_exception(e)
+    # unlink file after uploading
+    os.remove(result_path)
 
 client.run(discord_token)
 print("the end")
